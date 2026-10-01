@@ -138,11 +138,12 @@ class Ai_screenshot_parser
             ),
             'generationConfig' => array(
                 'temperature' => 0.15,
-                'maxOutputTokens' => 1400
+                'maxOutputTokens' => 1400,
+                'responseMimeType' => 'application/json'
             )
         );
 
-        $json = $this->post_gemini_with_fallbacks($settings, $payload, 'gemini-flash-latest', 10);
+        $json = $this->post_gemini_with_fallbacks($settings, $payload, 'gemini-flash-latest', 30);
         if (!$json || empty($json['candidates'][0]['content']['parts'])) {
             $this->last_error = $this->last_error ?: 'Gemini tidak mengembalikan analisa planner.';
             return null;
@@ -232,7 +233,7 @@ class Ai_screenshot_parser
                     )
                 )
             ),
-            'max_output_tokens' => 1800
+            'max_output_tokens' => 4096
         );
 
         $json = $this->post_json('https://api.openai.com/v1/responses', $settings, $payload);
@@ -270,7 +271,7 @@ class Ai_screenshot_parser
                     )
                 )
             ),
-            'max_tokens' => 1800
+            'max_tokens' => 4096
         );
 
         $endpoint = $this->chat_endpoint($settings);
@@ -311,11 +312,12 @@ class Ai_screenshot_parser
             ),
             'generationConfig' => array(
                 'temperature' => 0.1,
-                'maxOutputTokens' => 1800
+                'maxOutputTokens' => 4096,
+                'responseMimeType' => 'application/json'
             )
         );
 
-        $json = $this->post_gemini_with_fallbacks($settings, $payload, 'gemini-flash-latest', 12);
+        $json = $this->post_gemini_with_fallbacks($settings, $payload, 'gemini-flash-latest', 35);
         if (!$json) {
             return null;
         }
@@ -339,19 +341,20 @@ class Ai_screenshot_parser
         $preferred = $this->model($settings, $default_model);
         $models = array_values(array_unique(array_filter(array(
             $preferred,
-            'gemini-3.8-flash',
             'gemini-flash-latest',
-            'gemini-3.7-flash',
-            'gemini-3.6-flash',
+            'gemini-3.5-flash-lite',
+            'gemini-3.1-flash-lite',
             'gemini-3.5-flash',
-            'gemini-3.1-flash-lite'
+            'gemini-3.6-flash',
+            'gemini-3.7-flash',
+            'gemini-3.8-flash'
         ))));
 
         $errors = array();
         $attempts = 0;
         foreach ($models as $model) {
             $attempts++;
-            if ($attempts > 4) {
+            if ($attempts > 6) {
                 break;
             }
 
@@ -369,10 +372,32 @@ class Ai_screenshot_parser
             if (!$this->is_retryable_ai_error($this->last_error)) {
                 break;
             }
+
+            usleep(min(2500000, 350000 * $attempts));
         }
 
-        $this->last_error = implode(' | ', $errors);
+        $this->last_error = $this->summarize_gemini_errors($errors);
         return null;
+    }
+
+    private function summarize_gemini_errors($errors)
+    {
+        $raw = implode(' | ', $errors);
+        $lower = strtolower($raw);
+
+        if (strpos($lower, '503') !== false || strpos($lower, 'unavailable') !== false || strpos($lower, 'high demand') !== false) {
+            return 'Gemini sedang high demand/UNAVAILABLE di sisi Google setelah mencoba beberapa model fallback. Sistem fallback ke OCR lokal; coba lagi beberapa menit lagi atau pakai provider AI lain.';
+        }
+
+        if (strpos($lower, '429') !== false || strpos($lower, 'quota') !== false || strpos($lower, 'rate limit') !== false || strpos($lower, 'resource_exhausted') !== false) {
+            return 'Kuota Gemini API sudah habis atau terkena rate limit. Cek plan, billing, dan quota Google AI Studio; sementara sistem fallback ke OCR lokal.';
+        }
+
+        if (strpos($lower, 'timed out') !== false || strpos($lower, 'timeout') !== false) {
+            return 'Gemini timeout setelah mencoba beberapa model fallback. Sistem fallback ke OCR lokal; coba lagi nanti atau pakai model/provider yang lebih ringan.';
+        }
+
+        return substr($raw, 0, 420);
     }
 
     private function is_retryable_ai_error($message)
@@ -381,6 +406,8 @@ class Ai_screenshot_parser
         return strpos($message, '503') !== false
             || strpos($message, 'unavailable') !== false
             || strpos($message, 'high demand') !== false
+            || strpos($message, 'timed out') !== false
+            || strpos($message, 'timeout') !== false
             || strpos($message, 'overload') !== false
             || strpos($message, 'temporarily') !== false;
     }
@@ -389,7 +416,7 @@ class Ai_screenshot_parser
     {
         $payload = array(
             'model' => $this->model($settings, 'claude-sonnet-4-5'),
-            'max_tokens' => 1800,
+            'max_tokens' => 4096,
             'temperature' => 0.1,
             'messages' => array(
                 array(
@@ -509,17 +536,12 @@ class Ai_screenshot_parser
 
     private function normalize_rows($text)
     {
-        $text = trim($text);
-        $text = preg_replace('/^```(?:json)?\s*/i', '', $text);
-        $text = preg_replace('/\s*```$/', '', $text);
-
-        if (preg_match('/\[[\s\S]*\]/', $text, $match)) {
-            $text = $match[0];
-        }
+        $original_text = trim($text);
+        $text = $this->extract_json_payload($original_text, '[', ']');
 
         $rows = json_decode($text, true);
         if (!is_array($rows)) {
-            $this->last_error = 'JSON AI gagal dibaca: ' . substr($text, 0, 220);
+            $this->last_error = 'JSON AI gagal dibaca atau terpotong. Potongan respons: ' . substr($original_text, 0, 220);
             return array();
         }
 
@@ -555,17 +577,12 @@ class Ai_screenshot_parser
 
     private function normalize_planner($text)
     {
-        $text = trim($text);
-        $text = preg_replace('/^```(?:json)?\s*/i', '', $text);
-        $text = preg_replace('/\s*```$/', '', $text);
-
-        if (preg_match('/\{[\s\S]*\}/', $text, $match)) {
-            $text = $match[0];
-        }
+        $original_text = trim($text);
+        $text = $this->extract_json_payload($original_text, '{', '}');
 
         $json = json_decode($text, true);
         if (!is_array($json)) {
-            $this->last_error = 'JSON AI planner gagal dibaca: ' . substr($text, 0, 220);
+            $this->last_error = 'JSON AI planner gagal dibaca atau terpotong: ' . substr($original_text, 0, 220);
             return array();
         }
 
@@ -578,6 +595,21 @@ class Ai_screenshot_parser
             'warnings' => isset($json['warnings']) && is_array($json['warnings']) ? $json['warnings'] : array(),
             'item_notes' => isset($json['item_notes']) && is_array($json['item_notes']) ? $json['item_notes'] : array()
         );
+    }
+
+    private function extract_json_payload($text, $open, $close)
+    {
+        $text = trim($text);
+        $text = preg_replace('/^```(?:json)?\s*/i', '', $text);
+        $text = preg_replace('/\s*```$/', '', $text);
+
+        $start = strpos($text, $open);
+        $end = strrpos($text, $close);
+        if ($start !== false && $end !== false && $end > $start) {
+            return substr($text, $start, $end - $start + 1);
+        }
+
+        return $text;
     }
 
     private function asset_type($type)

@@ -3,10 +3,10 @@ defined('BASEPATH') OR exit('No direct script access allowed');
 
 class Recommendation_model extends CI_Model
 {
-    public function calculate($budget)
+    public function calculate($budget, $selected_asset_ids = null)
     {
         $portfolio = $this->Asset_model->portfolio();
-        $assets = $this->investable_assets($this->Asset_model->planning_assets());
+        $assets = $this->investable_assets($this->Asset_model->planning_assets(), $selected_asset_ids);
         $rdn_balance = $this->rdn_balance($portfolio);
         $context = $this->build_context($assets, $budget, $rdn_balance);
         $candidates = array();
@@ -23,7 +23,7 @@ class Recommendation_model extends CI_Model
             'summary' => $context,
             'plan' => $this->allocate_budget($candidates, $budget, $rdn_balance),
             'candidates' => $candidates,
-            'ai' => $this->ai_analysis($portfolio, $budget, $rdn_balance)
+            'ai' => $this->ai_analysis($portfolio, $budget, $rdn_balance, $selected_asset_ids)
         );
     }
 
@@ -38,11 +38,22 @@ class Recommendation_model extends CI_Model
         return $total;
     }
 
-    private function investable_assets($assets)
+    private function investable_assets($assets, $selected_asset_ids = null)
     {
         $investable = array();
+        $selected = array();
+        $has_selection_filter = is_array($selected_asset_ids);
+        if ($has_selection_filter) {
+            foreach ($selected_asset_ids as $id) {
+                $selected[(int) $id] = true;
+            }
+        }
+
         foreach ($assets as $asset) {
             if ($asset->type === 'kas' || $asset->type === 'rdn') {
+                continue;
+            }
+            if ($has_selection_filter && !isset($selected[(int) $asset->id])) {
                 continue;
             }
             $investable[] = $asset;
@@ -54,9 +65,11 @@ class Recommendation_model extends CI_Model
     {
         $total_market = 0;
         $type_counts = array();
+        $selected_asset_ids = array();
 
         foreach ($assets as $asset) {
             $total_market += (float) $asset->market_value;
+            $selected_asset_ids[] = (int) $asset->id;
             if (!isset($type_counts[$asset->type])) {
                 $type_counts[$asset->type] = 0;
             }
@@ -65,11 +78,12 @@ class Recommendation_model extends CI_Model
 
         return array(
             'total_market' => $total_market,
-            'future_total' => $total_market + $budget,
+            'future_total' => $total_market + $budget + $rdn_balance,
             'budget_plan' => $budget,
             'rdn_balance' => $rdn_balance,
             'stock_fund_buying_power' => $budget + $rdn_balance,
             'gold_buying_power' => $budget,
+            'selected_asset_ids' => $selected_asset_ids,
             'targets' => $this->target_weights($assets, $type_counts),
             'type_counts' => $type_counts
         );
@@ -127,25 +141,31 @@ class Recommendation_model extends CI_Model
             ? (float) $context['stock_fund_buying_power']
             : (float) $context['gold_buying_power'];
         $executable = $available >= $required && $required > 0;
-        $below_avg = (float) $asset->market_price > 0 && (float) $asset->avg_price > 0 && (float) $asset->market_price < (float) $asset->avg_price;
+        $planning_price = $this->planning_price($asset);
+        $below_avg = $planning_price > 0 && (float) $asset->avg_price > 0 && $planning_price < (float) $asset->avg_price;
+        $suggested_buy_price = $this->suggested_buy_price($asset);
+        $suggested_required = $this->minimum_required($asset, $suggested_buy_price);
 
         return array(
             'asset' => $asset,
             'required' => $required,
+            'suggested_required' => $suggested_required,
             'executable' => $executable,
             'target_weight' => $target_weight,
             'target_value' => $target_value,
             'allocation_gap' => $gap,
             'below_avg' => $below_avg,
+            'planning_price' => $planning_price,
+            'suggested_buy_price' => $suggested_buy_price,
             'score' => $this->score_asset($asset, $available, $executable, $gap, $below_avg),
             'reason' => $this->reason($asset, $gap, $target_weight, $below_avg, $required, $executable),
             'max_amount' => $this->max_amount($asset, $available)
         );
     }
 
-    private function minimum_required($asset)
+    private function minimum_required($asset, $price_override = null)
     {
-        $price = (float) $asset->market_price;
+        $price = $price_override !== null ? (float) $price_override : $this->planning_price($asset);
         if ($asset->type === 'saham') {
             return $price * max(1, (int) $asset->lot_size);
         }
@@ -207,6 +227,10 @@ class Recommendation_model extends CI_Model
             $allocation['score'] = $candidate['score'];
             $allocation['reason'] = $candidate['reason'];
             $allocation['avg_after'] = $this->avg_after($asset, $allocation['amount'], $allocation['quantity']);
+            $allocation['market_price'] = $candidate['planning_price'];
+            $allocation['suggested_buy_price'] = $candidate['suggested_buy_price'];
+            $allocation['suggested_amount'] = $this->amount_at_price($asset, $allocation['quantity'], $candidate['suggested_buy_price']);
+            $allocation['avg_after_suggested'] = $this->avg_after($asset, $allocation['suggested_amount'], $allocation['quantity']);
             $allocation['allocation_gap'] = $candidate['allocation_gap'];
             $allocation['target_weight'] = $candidate['target_weight'];
             $items[] = $allocation;
@@ -243,7 +267,7 @@ class Recommendation_model extends CI_Model
 
     private function allocation_for_asset($asset, $remaining, $desired)
     {
-        $price = (float) $asset->market_price;
+        $price = $this->planning_price($asset);
         $required = $this->minimum_required($asset);
 
         if ($asset->type === 'saham') {
@@ -285,6 +309,83 @@ class Recommendation_model extends CI_Model
         return ((float) $asset->invested_amount + $amount) / $total_quantity;
     }
 
+    private function suggested_buy_price($asset)
+    {
+        $market = $this->planning_price($asset);
+        $avg = (float) $asset->avg_price;
+        $target = (float) $asset->target_buy_price;
+
+        if ($target > 0) {
+            return $this->round_entry_price($asset, $target);
+        }
+
+        if ($asset->type === 'saham') {
+            $base = $market > 0 ? $market * 0.98 : $avg * 0.98;
+            if ($avg > 0 && $market > $avg) {
+                $base = min($base, $avg);
+            }
+            return $this->round_entry_price($asset, max(1, $base));
+        }
+
+        if ($asset->type === 'reksa_dana') {
+            $base = $market > 0 ? $market * 0.995 : $avg;
+            if ($avg > 0 && $market > $avg) {
+                $base = min($base, $avg);
+            }
+            return max(0, round($base, 4));
+        }
+
+        if ($asset->type === 'emas') {
+            $base = $market > 0 ? $market * 0.99 : $avg * 0.99;
+            return $this->round_entry_price($asset, max(0, $base));
+        }
+
+        return $market;
+    }
+
+    private function planning_price($asset)
+    {
+        if ($asset->type === 'emas' && (float) $asset->min_purchase_amount > 0) {
+            return (float) $asset->min_purchase_amount;
+        }
+
+        return (float) $asset->market_price;
+    }
+
+    private function amount_at_price($asset, $quantity, $price)
+    {
+        if ($quantity <= 0 || $price <= 0) {
+            return 0;
+        }
+
+        if (($asset->type === 'emas' && $asset->unit === 'gram') || ($asset->type === 'saham' && $asset->unit === 'lot')) {
+            return $quantity * 100 * $price;
+        }
+
+        return $quantity * $price;
+    }
+
+    private function round_entry_price($asset, $price)
+    {
+        if ($asset->type !== 'saham') {
+            return round($price, 0);
+        }
+
+        if ($price < 200) {
+            $tick = 1;
+        } elseif ($price < 500) {
+            $tick = 2;
+        } elseif ($price < 2000) {
+            $tick = 5;
+        } elseif ($price < 5000) {
+            $tick = 10;
+        } else {
+            $tick = 25;
+        }
+
+        return max($tick, floor($price / $tick) * $tick);
+    }
+
     private function score_asset($asset, $budget, $executable, $gap, $below_avg)
     {
         if (!$executable) {
@@ -304,7 +405,7 @@ class Recommendation_model extends CI_Model
             $score += 12;
         }
         if ($asset->type === 'emas') {
-            $score += ((float) $asset->market_price <= (float) $asset->target_buy_price) ? 18 : 2;
+            $score += ($this->planning_price($asset) <= (float) $asset->target_buy_price) ? 18 : 2;
         }
         if ($budget < 500000 && $asset->type === 'saham') {
             $score -= 10;
@@ -325,14 +426,19 @@ class Recommendation_model extends CI_Model
 
         if ($below_avg) {
             $parts[] = 'harga sekarang di bawah AVG, averaging lebih efektif';
-        } elseif ((float) $asset->avg_price > 0 && (float) $asset->market_price > 0) {
+        } elseif ((float) $asset->avg_price > 0 && $this->planning_price($asset) > 0) {
             $parts[] = 'harga sekarang belum di bawah AVG';
         }
         if ($asset->type === 'saham') {
             $parts[] = 'pembelian dibulatkan ke lot';
         }
+        if (in_array($asset->type, array('saham', 'reksa_dana'), true)) {
+            $parts[] = 'saldo RDN ikut dihitung sebagai buying power';
+        }
+        $parts[] = 'harga masuk ideal dipakai sebagai area tunggu, bukan kepastian harga akan tercapai';
         if ($asset->type === 'emas') {
-            $parts[] = 'emas fleksibel, tapi spread Tring tetap perlu diperhatikan';
+            $parts[] = 'emas hanya memakai budget input, bukan RDN';
+            $parts[] = 'spread Tring tetap perlu diperhatikan';
         }
         if ($asset->type === 'reksa_dana') {
             $parts[] = 'fleksibel untuk sisa dana kecil';
@@ -341,7 +447,7 @@ class Recommendation_model extends CI_Model
         return implode('; ', $parts) . '.';
     }
 
-    private function ai_analysis($portfolio, $budget, $rdn_balance)
+    private function ai_analysis($portfolio, $budget, $rdn_balance, $selected_asset_ids = array())
     {
         $ci =& get_instance();
         if (!isset($ci->ai_screenshot_parser)) {
@@ -349,7 +455,13 @@ class Recommendation_model extends CI_Model
         }
 
         $assets = array();
+        $selected = array();
+        foreach ((array) $selected_asset_ids as $id) {
+            $selected[(int) $id] = true;
+        }
+
         foreach ($portfolio as $asset) {
+            $is_selected_for_plan = isset($selected[(int) $asset->id]);
             $assets[] = array(
                 'asset_id' => (int) $asset->id,
                 'name' => $asset->name,
@@ -363,14 +475,16 @@ class Recommendation_model extends CI_Model
                 'market_price' => (float) $asset->market_price,
                 'market_value' => (float) $asset->market_value,
                 'invested_amount' => (float) $asset->invested_amount,
-                'is_planned' => (int) $asset->is_planned
+                'is_planned' => (int) $asset->is_planned,
+                'selected_for_this_plan' => $is_selected_for_plan ? 1 : 0
             );
         }
 
         $payload = array(
             'budget_plan' => $budget,
             'rdn_balance' => $rdn_balance,
-            'rule' => 'RDN hanya untuk saham/reksadana. Emas hanya memakai budget plan baru.',
+            'selected_asset_ids' => array_values(array_map('intval', (array) $selected_asset_ids)),
+            'rule' => 'RDN hanya untuk saham/reksadana. Emas hanya memakai budget plan baru. Analisa eksekusi hanya untuk aset selected_for_this_plan=1.',
             'assets' => $assets
         );
 

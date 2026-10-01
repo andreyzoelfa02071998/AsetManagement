@@ -49,6 +49,63 @@
     });
 
     document.addEventListener('DOMContentLoaded', function () {
+        var modal = document.querySelector('.js-price-reminder-modal');
+        var openButtons = document.querySelectorAll('.js-price-reminder-open');
+        if (!modal || !openButtons.length) {
+            return;
+        }
+        var assetSelect = modal.querySelector('.js-price-reminder-asset');
+        var assetIdInput = modal.querySelector('.js-price-reminder-asset-id');
+        var context = modal.querySelector('.js-price-reminder-context');
+        var lastOpener = null;
+
+        function openModal(opener) {
+            lastOpener = opener;
+            if (assetSelect && opener.getAttribute('data-asset-id')) {
+                assetSelect.value = opener.getAttribute('data-asset-id');
+            }
+            if (assetIdInput && opener.getAttribute('data-asset-id')) {
+                assetIdInput.value = opener.getAttribute('data-asset-id');
+            }
+            if (context && opener.getAttribute('data-asset-name')) {
+                context.textContent = 'Reminder untuk ' + opener.getAttribute('data-asset-name') + ' · harga acuan sekarang ' + (opener.getAttribute('data-current-price') || '-') + '.';
+            }
+            modal.hidden = false;
+            document.body.classList.add('modal-open');
+            var firstField = modal.querySelector('[name="price_alert_direction"], [name="price_alert_target"], button');
+            if (firstField) {
+                firstField.focus();
+            }
+        }
+
+        function closeModal() {
+            modal.hidden = true;
+            document.body.classList.remove('modal-open');
+            if (lastOpener) {
+                lastOpener.focus();
+            }
+        }
+
+        openButtons.forEach(function (button) {
+            button.addEventListener('click', function () {
+                openModal(button);
+            });
+        });
+
+        modal.addEventListener('click', function (event) {
+            if (event.target === modal || event.target.closest('.js-price-reminder-close')) {
+                closeModal();
+            }
+        });
+
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape' && !modal.hidden) {
+                closeModal();
+            }
+        });
+    });
+
+    document.addEventListener('DOMContentLoaded', function () {
         var provider = document.querySelector('.js-ai-provider');
         var model = document.querySelector('.js-ai-model');
         var tokenLink = document.querySelector('.js-ai-token-link');

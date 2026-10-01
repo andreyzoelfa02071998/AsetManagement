@@ -41,18 +41,32 @@
                                 <?php echo (int) $asset->is_planned ? 'Dipakai' : 'Skip'; ?>
                             </a>
                         </td>
-                        <td><?php echo number_format((float) $asset->quantity_current, 4, ',', '.'); ?> <?php echo html_escape($asset->unit); ?></td>
+                        <td>
+                            <?php if ($asset->type === 'saham' && $asset->unit === 'share'): ?>
+                                <?php echo number_format((float) $asset->quantity_current / 100, 0, ',', '.'); ?> lot
+                                <span class="muted">(<?php echo number_format((float) $asset->quantity_current, 0, ',', '.'); ?> lbr)</span>
+                            <?php elseif ($asset->type === 'saham' && $asset->unit === 'lot'): ?>
+                                <?php echo number_format((float) $asset->quantity_current, 0, ',', '.'); ?> lot
+                                <span class="muted">(<?php echo number_format((float) $asset->quantity_current * 100, 0, ',', '.'); ?> lbr)</span>
+                            <?php else: ?>
+                                <?php echo number_format((float) $asset->quantity_current, 4, ',', '.'); ?> <?php echo html_escape($asset->unit); ?>
+                            <?php endif; ?>
+                        </td>
                         <td class="text-right"><?php echo $asset->market_price ? rupiah($asset->market_price) : '-'; ?></td>
                         <td class="text-right"><?php echo isset($asset->market_value) && $asset->market_value ? rupiah($asset->market_value) : rupiah($this->Asset_model->calculate_market_value((array) $asset)); ?></td>
                         <td class="text-right"><?php echo $asset->target_buy_price ? rupiah($asset->target_buy_price) : '-'; ?></td>
                         <td>
                             <?php if (isset($asset->price_alert_enabled) && (int) $asset->price_alert_enabled && (float) $asset->price_alert_target > 0): ?>
+                                <?php $alert_price = $this->Asset_model->price_alert_reference($asset); ?>
                                 <span class="badge <?php echo !empty($asset->price_alert_triggered_at) ? 'warning' : 'muted'; ?>">
                                     <?php echo !empty($asset->price_alert_triggered_at) ? 'Kena target' : 'Aktif'; ?>
                                 </span>
                                 <div class="muted">
                                     Harga <?php echo $asset->price_alert_direction === 'above' ? '>=' : '<='; ?>
                                     <?php echo rupiah($asset->price_alert_target); ?>
+                                </div>
+                                <div class="muted">
+                                    Pantau: <?php echo rupiah($alert_price); ?><?php echo $asset->type === 'emas' ? ' beli baru' : ''; ?>
                                 </div>
                             <?php else: ?>
                                 -

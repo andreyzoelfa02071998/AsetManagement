@@ -80,48 +80,124 @@ class Onboarding extends MY_Controller
             mkdir($config['upload_path'], 0777, TRUE);
         }
 
-        $this->upload->initialize($config);
-        if (!$this->upload->do_upload('screenshot')) {
-            $this->session->set_flashdata('error', $this->upload->display_errors('', ''));
+        $platform = $this->input->post('platform', TRUE);
+        $processor = $this->ai_processor_info();
+        $files = $this->normalize_upload_files('screenshot');
+
+        if (empty($files)) {
+            $this->session->set_flashdata('error', 'Pilih minimal satu gambar portfolio.');
             redirect('onboarding');
         }
 
-        $file = $this->upload->data();
-        $platform = $this->input->post('platform', TRUE);
-        $processor = $this->ai_processor_info();
-        $parsed_items = $this->ai_screenshot_parser->parse($file['full_path'], $platform);
-        $ai_error = $this->ai_screenshot_parser->last_error();
-        $used_ai = !empty($parsed_items);
-        $processor_notes = $used_ai ? 'Diproses dengan AI Vision.' : '';
+        $all_items = array();
+        $failed = array();
+        $used_ai_count = 0;
+        $used_ocr_count = 0;
+        $notes = array();
 
-        if (empty($parsed_items)) {
-            $parsed_items = $this->screenshot_parser->parse($file['full_path'], $platform);
-            $processor_notes = $ai_error
-                ? 'AI tidak dipakai/ gagal: ' . substr($ai_error, 0, 180) . ' Fallback ke OCR lokal.'
-                : 'Fallback ke OCR lokal.';
+        foreach ($files as $index => $file_input) {
+            $_FILES['screenshot_item'] = $file_input;
+            $this->upload->initialize($config);
+
+            if (!$this->upload->do_upload('screenshot_item')) {
+                $failed[] = $file_input['name'] . ': ' . $this->upload->display_errors('', '');
+                continue;
+            }
+
+            $file = $this->upload->data();
+            $result = $this->parse_uploaded_image($file, $platform, $processor, $index + 1);
+            $all_items = array_merge($all_items, $result['items']);
+            $used_ai_count += $result['used_ai'] ? 1 : 0;
+            $used_ocr_count += $result['used_ai'] ? 0 : 1;
+            if ($result['note'] !== '') {
+                $notes[] = $result['note'];
+            }
+
+            if (is_file($file['full_path'])) {
+                @unlink($file['full_path']);
+            }
         }
 
-        if (is_file($file['full_path'])) {
-            @unlink($file['full_path']);
+        unset($_FILES['screenshot_item']);
+
+        if (empty($all_items) && !empty($failed)) {
+            $this->session->set_flashdata('error', implode(' | ', $failed));
+            redirect('onboarding');
+        }
+
+        if (!empty($failed)) {
+            $notes[] = 'Beberapa gambar gagal upload: ' . implode(' | ', $failed);
+        }
+
+        $processor_notes = 'Diproses ' . count($files) . ' gambar. AI: ' . $used_ai_count . ', OCR lokal: ' . $used_ocr_count . '.';
+        if (!empty($notes)) {
+            $processor_notes .= ' ' . substr(implode(' | ', $notes), 0, 220);
         }
 
         $batch_id = $this->Import_model->create_batch(array(
             'source_type' => 'screenshot',
             'platform' => $platform,
             'file_path' => null,
-            'processor_type' => $used_ai ? 'ai' : 'ocr',
-            'processor_name' => $used_ai ? $processor['provider'] : 'OCR lokal',
-            'processor_model' => $used_ai ? $processor['model'] : 'Windows OCR + parser lokal',
+            'processor_type' => $used_ai_count > 0 ? 'ai' : 'ocr',
+            'processor_name' => $used_ai_count > 0 ? $processor['provider'] : 'OCR lokal',
+            'processor_model' => $used_ai_count > 0 ? $processor['model'] : 'Windows OCR + parser lokal',
             'processor_notes' => $processor_notes,
             'status' => 'review'
         ));
 
+        $this->Import_model->replace_items($batch_id, $all_items);
+
+        redirect('onboarding/review/' . $batch_id);
+    }
+
+    private function normalize_upload_files($field)
+    {
+        if (empty($_FILES[$field]['name'])) {
+            return array();
+        }
+
+        if (!is_array($_FILES[$field]['name'])) {
+            return array($_FILES[$field]);
+        }
+
+        $files = array();
+        foreach ($_FILES[$field]['name'] as $index => $name) {
+            if ($name === '') {
+                continue;
+            }
+
+            $files[] = array(
+                'name' => $_FILES[$field]['name'][$index],
+                'type' => $_FILES[$field]['type'][$index],
+                'tmp_name' => $_FILES[$field]['tmp_name'][$index],
+                'error' => $_FILES[$field]['error'][$index],
+                'size' => $_FILES[$field]['size'][$index]
+            );
+        }
+
+        return $files;
+    }
+
+    private function parse_uploaded_image($file, $platform, $processor, $number)
+    {
+        $parsed_items = $this->ai_screenshot_parser->parse($file['full_path'], $platform);
+        $ai_error = $this->ai_screenshot_parser->last_error();
+        $used_ai = !empty($parsed_items);
+        $note = $used_ai ? 'Gambar ' . $number . ' diproses dengan AI Vision.' : '';
+
+        if (empty($parsed_items)) {
+            $parsed_items = $this->screenshot_parser->parse($file['full_path'], $platform);
+            $note = $ai_error
+                ? 'Gambar ' . $number . ' AI belum menghasilkan JSON lengkap. Fallback OCR lokal.'
+                : 'Gambar ' . $number . ' fallback OCR lokal.';
+        }
+
         if (empty($parsed_items)) {
             $ocr_text = method_exists($this->screenshot_parser, 'last_ocr_text') ? trim($this->screenshot_parser->last_ocr_text()) : '';
-            $ai_note = $ai_error ? 'AI: ' . $ai_error . ' ' : '';
-            $notes = $ocr_text === ''
-                ? $ai_note . 'OCR tidak membaca teks dari gambar. Coba crop screenshot lebih dekat ke kartu aset lalu upload ulang.'
-                : $ai_note . 'Belum terbaca otomatis. Teks OCR: ' . substr(preg_replace('/\s+/', ' ', $ocr_text), 0, 220);
+            $ai_note = $ai_error ? 'AI belum menghasilkan JSON lengkap. ' : '';
+            $fallback_note = $ocr_text === ''
+                ? $ai_note . 'OCR tidak membaca teks dari gambar ' . $number . '. Coba crop screenshot lebih dekat ke kartu aset lalu upload ulang.'
+                : $ai_note . 'Gambar ' . $number . ' belum terbaca otomatis. Teks OCR: ' . substr(preg_replace('/\s+/', ' ', $ocr_text), 0, 220);
             $parsed_items = array(array(
                 'asset_type' => 'lainnya',
                 'platform' => $platform,
@@ -134,13 +210,21 @@ class Onboarding extends MY_Controller
                 'market_price' => 0,
                 'invested_amount' => 0,
                 'confidence' => 0,
-                'notes' => $notes
+                'notes' => $fallback_note
             ));
+        } else {
+            foreach ($parsed_items as &$item) {
+                $prefix = 'Gambar ' . $number;
+                $item['notes'] = trim($prefix . (empty($item['notes']) ? '' : ': ' . $item['notes']));
+            }
+            unset($item);
         }
 
-        $this->Import_model->replace_items($batch_id, $parsed_items);
-
-        redirect('onboarding/review/' . $batch_id);
+        return array(
+            'items' => $parsed_items,
+            'used_ai' => $used_ai,
+            'note' => $note
+        );
     }
 
     public function review($batch_id)

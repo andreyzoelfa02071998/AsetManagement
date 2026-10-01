@@ -156,4 +156,46 @@ class Assets extends MY_Controller
         $this->session->set_flashdata('success', 'Flag planner aset berhasil diperbarui.');
         redirect('aset');
     }
+
+    public function save_reminder()
+    {
+        if ($this->input->post('price_alert_target') !== null) {
+            $_POST['price_alert_target'] = $this->clean_number($this->input->post('price_alert_target'));
+        }
+
+        $asset_id = (int) $this->input->post('asset_id');
+        $asset = $this->Asset_model->find($asset_id);
+
+        if (!$asset) {
+            $this->session->set_flashdata('error', 'Aset untuk reminder tidak ditemukan.');
+            redirect('dashboard');
+        }
+
+        if (in_array($asset->type, array('kas', 'rdn'), true)) {
+            $this->session->set_flashdata('error', 'Reminder harga tidak berlaku untuk Kas atau Saldo RDN.');
+            redirect('dashboard');
+        }
+
+        $target = (float) ($this->input->post('price_alert_target') ?: 0);
+        if ($target <= 0) {
+            $this->session->set_flashdata('error', 'Harga target reminder harus lebih dari 0.');
+            redirect('dashboard');
+        }
+
+        $direction = $this->input->post('price_alert_direction', TRUE);
+        if (!in_array($direction, array('below', 'above'), true)) {
+            $direction = 'below';
+        }
+
+        $this->Asset_model->update($asset_id, array(
+            'price_alert_enabled' => 1,
+            'price_alert_target' => $target,
+            'price_alert_direction' => $direction,
+            'price_alert_triggered_at' => null,
+            'price_alert_last_price' => null
+        ));
+
+        $this->session->set_flashdata('success', 'Reminder harga berhasil disimpan.');
+        redirect('dashboard');
+    }
 }

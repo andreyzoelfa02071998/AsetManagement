@@ -26,10 +26,12 @@
             <div class="field">
                 <label>Qty</label>
                 <input class="money-input" type="text" inputmode="decimal" name="quantity" value="<?php echo set_value('quantity'); ?>" required>
+                <div class="muted">Untuk saham isi dalam lot. Contoh REAL 102 lot, sistem otomatis baca sebagai 10.200 lembar.</div>
             </div>
             <div class="field">
                 <label>Harga</label>
                 <input class="money-input" type="text" inputmode="decimal" name="price" value="<?php echo set_value('price'); ?>" required>
+                <div class="muted">Untuk saham tetap isi harga per lembar. Hasil jual bersih otomatis masuk Saldo RDN.</div>
             </div>
             <div class="field">
                 <label>Fee</label>

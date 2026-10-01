@@ -31,7 +31,8 @@
                 </div>
                 <div class="field">
                     <label>Screenshot</label>
-                    <input type="file" name="screenshot" accept="image/*" required>
+                    <input type="file" name="screenshot[]" accept="image/*" multiple required>
+                    <div class="muted">Bisa pilih lebih dari satu gambar. Semua hasilnya akan digabung di halaman review.</div>
                 </div>
             </div>
             <div class="actions" style="margin-top:18px">

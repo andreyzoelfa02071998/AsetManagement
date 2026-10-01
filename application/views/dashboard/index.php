@@ -60,6 +60,9 @@
     $portfolio_goal_count = count($portfolio_group_summary);
     $hit_price_alerts = array();
     $watching_price_alerts = array();
+    $reminder_assets = array_filter($assets, function ($asset) {
+        return !in_array($asset->type, array('kas', 'rdn'), true);
+    });
     foreach (!empty($price_alerts) ? $price_alerts : array() as $alert_asset) {
         if (!empty($alert_asset->price_alert_triggered_at)) {
             $hit_price_alerts[] = $alert_asset;
@@ -100,6 +103,59 @@
     </div>
 </section>
 
+<div class="modal-backdrop js-price-reminder-modal" hidden>
+    <div class="app-modal" role="dialog" aria-modal="true" aria-labelledby="price-reminder-title">
+        <div class="modal-head">
+            <div>
+                <span class="eyebrow">Price Alert</span>
+                <h3 id="price-reminder-title">Tambah Reminder Harga</h3>
+            </div>
+            <button class="modal-close js-price-reminder-close" type="button" aria-label="Tutup">×</button>
+        </div>
+        <?php if (empty($reminder_assets)): ?>
+            <div class="empty">Belum ada aset yang bisa dipasang reminder harga.</div>
+        <?php else: ?>
+            <?php echo form_open('aset/reminder', array('class' => 'modal-form')); ?>
+                <label>
+                    Aset
+                    <select class="js-price-reminder-asset" disabled>
+                        <?php foreach ($reminder_assets as $asset): ?>
+                            <?php
+                                $reference_price = $this->Asset_model->price_alert_reference($asset);
+                                $asset_label = ($asset->symbol ? $asset->symbol . ' - ' : '') . $asset->name;
+                                $asset_hint = $asset->type === 'emas' ? 'Harga beli baru' : 'Market';
+                            ?>
+                            <option value="<?php echo (int) $asset->id; ?>">
+                                <?php echo html_escape($asset_label); ?> · <?php echo html_escape($asset_type_labels[$asset->type] ?? $asset->type); ?> · <?php echo $asset_hint; ?> <?php echo rupiah($reference_price); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <input class="js-price-reminder-asset-id" name="asset_id" type="hidden" required>
+                <div class="muted js-price-reminder-context modal-selected-asset">Aset reminder mengikuti tombol yang diklik.</div>
+                <div class="form-grid two">
+                    <label>
+                        Arah Reminder
+                        <select name="price_alert_direction">
+                            <option value="below">Ingatkan saat harga <= target</option>
+                            <option value="above">Ingatkan saat harga >= target</option>
+                        </select>
+                    </label>
+                    <label>
+                        Harga Target
+                        <input class="money-input" name="price_alert_target" type="text" inputmode="decimal" placeholder="Contoh 6.000" required>
+                    </label>
+                </div>
+                <div class="muted modal-help">Aset dikunci sesuai tombol reminder yang diklik. Untuk emas, reminder memakai harga beli baru. Untuk saham dan aset lain, reminder memakai harga market terakhir.</div>
+                <div class="modal-actions">
+                    <button class="btn secondary js-price-reminder-close" type="button">Batal</button>
+                    <button class="btn" type="submit">Simpan Reminder</button>
+                </div>
+            <?php echo form_close(); ?>
+        <?php endif; ?>
+    </div>
+</div>
+
 <section class="dashboard-kpi-grid">
     <div class="dashboard-kpi">
         <span>Aset Aktif</span>
@@ -129,6 +185,7 @@
         </div>
         <div class="price-alert-grid">
             <?php foreach ($hit_price_alerts as $alert): ?>
+                <?php $alert_price = $this->Asset_model->price_alert_reference($alert); ?>
                 <div class="price-alert-card hit">
                     <div>
                         <span class="badge warning">Kena target</span>
@@ -136,7 +193,7 @@
                         <small><?php echo html_escape($alert->name); ?> · <?php echo html_escape($asset_type_labels[$alert->type] ?? $alert->type); ?></small>
                     </div>
                     <div class="price-alert-values">
-                        <span>Market <?php echo rupiah($alert->market_price); ?></span>
+                        <span><?php echo $alert->type === 'emas' ? 'Harga beli baru' : 'Market'; ?> <?php echo rupiah($alert_price); ?></span>
                         <strong>Target <?php echo $alert->price_alert_direction === 'above' ? '>=' : '<='; ?> <?php echo rupiah($alert->price_alert_target); ?></strong>
                     </div>
                     <a class="btn secondary" href="<?php echo site_url('aset/edit/' . $alert->id); ?>">Atur ulang</a>
@@ -144,6 +201,7 @@
             <?php endforeach; ?>
 
             <?php foreach (array_slice($watching_price_alerts, 0, 4) as $alert): ?>
+                <?php $alert_price = $this->Asset_model->price_alert_reference($alert); ?>
                 <div class="price-alert-card">
                     <div>
                         <span class="badge muted">Dipantau</span>
@@ -151,7 +209,7 @@
                         <small><?php echo html_escape($alert->name); ?> · <?php echo html_escape($asset_type_labels[$alert->type] ?? $alert->type); ?></small>
                     </div>
                     <div class="price-alert-values">
-                        <span>Market <?php echo rupiah($alert->market_price); ?></span>
+                        <span><?php echo $alert->type === 'emas' ? 'Harga beli baru' : 'Market'; ?> <?php echo rupiah($alert_price); ?></span>
                         <strong>Target <?php echo $alert->price_alert_direction === 'above' ? '>=' : '<='; ?> <?php echo rupiah($alert->price_alert_target); ?></strong>
                     </div>
                 </div>
@@ -297,6 +355,7 @@
                             <th class="text-right">Modal</th>
                             <th class="text-right">Nilai Market</th>
                             <th class="text-right">P&L</th>
+                            <th class="text-right">Reminder</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -347,6 +406,20 @@
                                         <?php echo rupiah($row->gain_loss); ?>
                                     </strong>
                                 </td>
+                                <td class="text-right">
+                                    <?php if (!in_array($row->type, array('kas', 'rdn'), true)): ?>
+                                        <?php $alert_reference = $this->Asset_model->price_alert_reference($row); ?>
+                                        <button class="btn secondary table-action-btn js-price-reminder-open"
+                                                type="button"
+                                                data-asset-id="<?php echo (int) $row->id; ?>"
+                                                data-asset-name="<?php echo html_escape($row->symbol ?: $row->name); ?>"
+                                                data-current-price="<?php echo rupiah($alert_reference); ?>">
+                                            Reminder
+                                        </button>
+                                    <?php else: ?>
+                                        <span class="muted">-</span>
+                                    <?php endif; ?>
+                                </td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
@@ -376,11 +449,18 @@
                     </thead>
                     <tbody>
                         <?php foreach ($recent_transactions as $transaction): ?>
+                            <?php
+                                $multiplier = (($transaction->asset_type === 'saham' && $transaction->asset_unit === 'lot') || ($transaction->asset_type === 'emas' && $transaction->asset_unit === 'gram')) ? 100 : 1;
+                                $gross_value = (float) $transaction->quantity * $multiplier * (float) $transaction->price;
+                                $net_value = $transaction->transaction_type === 'sell'
+                                    ? $gross_value - (float) $transaction->fee
+                                    : $gross_value + (float) $transaction->fee;
+                            ?>
                             <tr>
                                 <td><?php echo html_escape($transaction->transaction_date); ?></td>
                                 <td><?php echo html_escape($transaction->asset_name); ?></td>
                                 <td><?php echo strtoupper(html_escape($transaction->transaction_type)); ?></td>
-                                <td class="text-right"><?php echo rupiah(($transaction->quantity * $transaction->price) + $transaction->fee); ?></td>
+                                <td class="text-right"><?php echo rupiah($net_value); ?></td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>

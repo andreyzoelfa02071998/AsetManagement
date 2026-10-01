@@ -167,13 +167,14 @@ class Asset_model extends CI_Model
     public function evaluate_price_alert($id)
     {
         $asset = $this->find($id);
-        if (!$asset || !(int) $asset->price_alert_enabled || (float) $asset->price_alert_target <= 0 || (float) $asset->market_price <= 0) {
+        $alert_price = $this->price_alert_reference($asset);
+        if (!$asset || !(int) $asset->price_alert_enabled || (float) $asset->price_alert_target <= 0 || $alert_price <= 0) {
             return false;
         }
 
-        $is_hit = $this->is_price_alert_hit($asset);
+        $is_hit = $this->is_price_alert_hit($asset, $alert_price);
         $payload = array(
-            'price_alert_last_price' => (float) $asset->market_price
+            'price_alert_last_price' => $alert_price
         );
 
         if ($is_hit && empty($asset->price_alert_triggered_at)) {
@@ -188,13 +189,26 @@ class Asset_model extends CI_Model
             ->update('assets', $payload);
     }
 
-    private function is_price_alert_hit($asset)
+    public function price_alert_reference($asset)
     {
-        if ($asset->price_alert_direction === 'above') {
-            return (float) $asset->market_price >= (float) $asset->price_alert_target;
+        if (!$asset) {
+            return 0;
         }
 
-        return (float) $asset->market_price <= (float) $asset->price_alert_target;
+        if ($asset->type === 'emas' && (float) $asset->min_purchase_amount > 0) {
+            return (float) $asset->min_purchase_amount;
+        }
+
+        return (float) $asset->market_price;
+    }
+
+    private function is_price_alert_hit($asset, $alert_price)
+    {
+        if ($asset->price_alert_direction === 'above') {
+            return (float) $alert_price >= (float) $asset->price_alert_target;
+        }
+
+        return (float) $alert_price <= (float) $asset->price_alert_target;
     }
 
     public function types()

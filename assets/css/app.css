@@ -438,6 +438,95 @@ a {
     white-space: nowrap;
 }
 
+body.modal-open {
+    overflow: hidden;
+}
+
+.modal-backdrop {
+    align-items: center;
+    background: rgba(11, 20, 31, .56);
+    backdrop-filter: blur(8px);
+    display: flex;
+    inset: 0;
+    justify-content: center;
+    padding: 18px;
+    position: fixed;
+    z-index: 80;
+}
+
+.modal-backdrop[hidden] {
+    display: none;
+}
+
+.app-modal {
+    background: #ffffff;
+    border: 1px solid rgba(216, 224, 232, .95);
+    border-radius: 8px;
+    box-shadow: 0 24px 70px rgba(11, 20, 31, .25);
+    max-width: 680px;
+    padding: 22px;
+    width: min(100%, 680px);
+}
+
+.modal-head,
+.modal-actions {
+    align-items: center;
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+}
+
+.modal-head {
+    margin-bottom: 18px;
+}
+
+.modal-head h3 {
+    margin: 4px 0 0;
+}
+
+.modal-close {
+    align-items: center;
+    background: #eef3f7;
+    border: 1px solid rgba(216, 224, 232, .95);
+    border-radius: 8px;
+    color: var(--text);
+    cursor: pointer;
+    display: inline-flex;
+    font-size: 24px;
+    height: 38px;
+    justify-content: center;
+    line-height: 1;
+    width: 38px;
+}
+
+.modal-form {
+    display: grid;
+    gap: 16px;
+}
+
+.modal-help {
+    line-height: 1.55;
+}
+
+.modal-selected-asset {
+    background: #f4f8fb;
+    border: 1px solid rgba(216, 224, 232, .95);
+    border-radius: 8px;
+    padding: 10px 12px;
+}
+
+.js-price-reminder-asset:disabled {
+    background: #eef3f7;
+    color: var(--text);
+    cursor: not-allowed;
+    opacity: 1;
+}
+
+.modal-actions {
+    justify-content: flex-end;
+    margin-top: 2px;
+}
+
 .category-list,
 .allocation-list {
     display: grid;
@@ -607,7 +696,12 @@ a {
 }
 
 .portfolio-panel .market-table {
-    min-width: 1080px;
+    min-width: 1180px;
+}
+
+.table-action-btn {
+    min-height: 34px;
+    padding: 8px 12px;
 }
 
 .type-pill {
@@ -756,6 +850,51 @@ a {
 .planner-ai-grid p {
     line-height: 1.6;
     margin: 8px 0 0;
+}
+
+.planner-asset-picker {
+    border: 1px solid rgba(216, 224, 232, .9);
+    border-radius: 8px;
+    display: grid;
+    gap: 0;
+    overflow: hidden;
+}
+
+.planner-asset-option {
+    align-items: center;
+    background: #ffffff;
+    border-bottom: 1px solid rgba(216, 224, 232, .86);
+    cursor: pointer;
+    display: flex;
+    gap: 12px;
+    margin: 0;
+    min-height: 58px;
+    padding: 12px;
+}
+
+.planner-asset-option:last-child {
+    border-bottom: 0;
+}
+
+.planner-asset-option:hover {
+    background: #f4f8fb;
+}
+
+.planner-asset-option input {
+    min-height: auto;
+    width: auto;
+}
+
+.planner-asset-option strong,
+.planner-asset-option small {
+    display: block;
+}
+
+.planner-asset-option small {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 750;
+    margin-top: 3px;
 }
 
 .news-list {

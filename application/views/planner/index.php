@@ -10,6 +10,31 @@
                     <label>Budget yang mau diplan</label>
                     <input class="money-input" type="text" name="budget" value="<?php echo $budget !== null ? angka_input($budget) : ''; ?>" placeholder="Contoh: 1.000.000" required>
                 </div>
+                <div class="field full">
+                    <label>Budget ini dipakai untuk aset</label>
+                    <?php if (empty($planning_assets)): ?>
+                        <div class="empty">Belum ada aset yang ditandai masuk Planner. Aktifkan flag Plan di menu Master Aset dulu.</div>
+                    <?php else: ?>
+                        <div class="planner-asset-picker">
+                            <?php foreach ($planning_assets as $asset): ?>
+                                <?php if (in_array($asset->type, array('kas', 'rdn'), true)) { continue; } ?>
+                                <?php $checked = in_array((int) $asset->id, (array) $selected_asset_ids, true); ?>
+                                <label class="planner-asset-option">
+                                    <input type="checkbox" name="selected_assets[]" value="<?php echo (int) $asset->id; ?>" <?php echo $checked ? 'checked' : ''; ?>>
+                                    <span>
+                                        <strong><?php echo html_escape($asset->name); ?></strong>
+                                        <small>
+                                            <?php echo html_escape(str_replace('_', ' ', $asset->type)); ?>
+                                            <?php if (!empty($asset->symbol)): ?> · <?php echo html_escape($asset->symbol); ?><?php endif; ?>
+                                            <?php if (!empty($asset->portfolio_name)): ?> · <?php echo html_escape($asset->portfolio_name); ?><?php endif; ?>
+                                        </small>
+                                    </span>
+                                </label>
+                            <?php endforeach; ?>
+                        </div>
+                        <p class="muted">Aset yang tidak dicentang tetap ada di portfolio, tapi tidak ikut dihitung sebagai kandidat pembelian budget ini.</p>
+                    <?php endif; ?>
+                </div>
             </div>
             <div class="actions" style="margin-top:16px">
                 <button class="btn" type="submit">Hitung Plan</button>
@@ -26,7 +51,8 @@
             Rekomendasi dihitung dari target komposisi, nilai market saat ini, harga terbaru, minimum pembelian, saldo RDN, dan efek AVG setelah beli.
         </p>
         <p class="muted">
-            Saldo RDN dipakai sebagai modal untuk saham/reksadana. Emas hanya memakai budget plan baru.
+            Budget input dianggap cash baru. Saldo RDN ikut dihitung sebagai buying power saham/reksadana karena pembeliannya lewat RDN.
+            Emas hanya memakai budget input, tidak memakai RDN.
         </p>
     </div>
 </section>
@@ -66,6 +92,7 @@
             <div class="metric">
                 Buying power saham/RD
                 <strong><?php echo rupiah($summary['stock_fund_buying_power']); ?></strong>
+                <span class="muted">Budget <?php echo rupiah($summary['budget_plan']); ?> + RDN <?php echo rupiah($summary['rdn_balance']); ?></span>
             </div>
         </div>
         <div class="panel">
@@ -134,8 +161,11 @@
                             <th class="text-right">Qty Beli</th>
                             <th class="text-right">Nominal</th>
                             <th>Sumber Dana</th>
+                            <th class="text-right">Harga Beli Sekarang</th>
+                            <th class="text-right">Harga Masuk Ideal</th>
                             <th class="text-right">AVG Sekarang</th>
-                            <th class="text-right">AVG Setelah Beli</th>
+                            <th class="text-right">AVG Jika Beli Sekarang</th>
+                            <th class="text-right">AVG Jika Tunggu Ideal</th>
                             <th>Alasan</th>
                         </tr>
                     </thead>
@@ -156,7 +186,7 @@
                                 <td class="text-right">
                                     <?php if ($asset->type === 'saham'): ?>
                                         <?php echo html_escape($item['unit_label']); ?>
-                                        <div class="muted"><?php echo number_format((float) $item['quantity'], 0, ',', '.'); ?> lbr</div>
+                                        <span class="muted">(<?php echo number_format((float) $item['quantity'], 0, ',', '.'); ?> lbr)</span>
                                     <?php elseif ($asset->unit === 'idr'): ?>
                                         <?php echo rupiah($item['quantity']); ?>
                                     <?php else: ?>
@@ -172,8 +202,19 @@
                                         <div>Budget <?php echo rupiah($item['from_budget']); ?></div>
                                     <?php endif; ?>
                                 </td>
+                                <td class="text-right">
+                                    <?php echo rupiah($item['market_price']); ?>
+                                    <?php if ($asset->type === 'emas'): ?>
+                                        <div class="muted">harga beli baru</div>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="text-right">
+                                    <strong><?php echo rupiah($item['suggested_buy_price']); ?></strong>
+                                    <div class="muted"><?php echo rupiah($item['suggested_amount']); ?></div>
+                                </td>
                                 <td class="text-right"><?php echo rupiah($asset->avg_price); ?></td>
                                 <td class="text-right"><?php echo rupiah($item['avg_after']); ?></td>
+                                <td class="text-right"><?php echo rupiah($item['avg_after_suggested']); ?></td>
                                 <td>
                                     <?php echo html_escape($item['reason']); ?>
                                     <?php if (!empty($ai['item_notes'][(string) $asset->id])): ?>
@@ -205,6 +246,7 @@
                             <th class="text-right">Target</th>
                             <th class="text-right">Gap Alokasi</th>
                             <th class="text-right">Min Beli</th>
+                            <th class="text-right">Harga Masuk Ideal</th>
                             <th>Status</th>
                             <th class="text-right">Score</th>
                             <th>Alasan</th>
@@ -227,6 +269,10 @@
                                 <td class="text-right"><?php echo number_format((float) $candidate['target_weight'], 1, ',', '.'); ?>%</td>
                                 <td class="text-right"><?php echo rupiah($candidate['allocation_gap']); ?></td>
                                 <td class="text-right"><?php echo rupiah($candidate['required']); ?></td>
+                                <td class="text-right">
+                                    <?php echo rupiah($candidate['suggested_buy_price']); ?>
+                                    <div class="muted">min <?php echo rupiah($candidate['suggested_required']); ?></div>
+                                </td>
                                 <td>
                                     <span class="badge <?php echo $candidate['executable'] ? 'success' : 'warning'; ?>">
                                         <?php echo $candidate['executable'] ? 'Bisa dibeli' : 'Budget kurang'; ?>

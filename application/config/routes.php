@@ -7,6 +7,7 @@ $route['aset/create'] = 'assets/create';
 $route['aset/edit/(:num)'] = 'assets/edit/$1';
 $route['aset/delete/(:num)'] = 'assets/delete/$1';
 $route['aset/toggle-plan/(:num)'] = 'assets/toggle_plan/$1';
+$route['aset/reminder'] = 'assets/save_reminder';
 $route['onboarding'] = 'onboarding';
 $route['onboarding/upload'] = 'onboarding/upload';
 $route['onboarding/review/(:num)'] = 'onboarding/review/$1';

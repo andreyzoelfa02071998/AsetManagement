@@ -8,8 +8,8 @@
             'gpt-4.1-mini' => 'GPT-4.1 Mini - alternatif [Berbayar]'
         ),
         'gemini' => array(
-            'gemini-3.8-flash' => 'Gemini 3.8 Flash - terbaru [Berbayar]',
             'gemini-flash-latest' => 'Gemini Flash Latest - direkomendasikan [Free tier / Berbayar]',
+            'gemini-3.8-flash' => 'Gemini 3.8 Flash - terbaru/lebih berat [Berbayar]',
             'gemini-3.7-flash' => 'Gemini 3.7 Flash - terbaru [Berbayar]',
             'gemini-3.6-flash' => 'Gemini 3.6 Flash - stabil [Free tier / Berbayar]',
             'gemini-3.5-flash' => 'Gemini 3.5 Flash - kompatibel [Free tier / Berbayar]',

@@ -29,18 +29,33 @@ class Transactions extends MY_Controller
         $this->form_validation->set_rules('price', 'Harga', 'required|numeric');
 
         if ($this->form_validation->run()) {
-            $this->Transaction_model->insert(array(
+            $asset = $this->Asset_model->find($this->input->post('asset_id'));
+            $quantity = $this->input->post('quantity');
+            $notes = $this->input->post('notes', TRUE);
+
+            if ($asset && $asset->type === 'saham' && $asset->unit === 'share') {
+                $lot_quantity = (float) $quantity;
+                $quantity = $lot_quantity * 100;
+                $notes = trim(($notes ?: '') . ' Input transaksi: ' . number_format($lot_quantity, 4, ',', '.') . ' lot.');
+            }
+
+            $saved = $this->Transaction_model->insert(array(
                 'asset_id' => $this->input->post('asset_id'),
                 'transaction_date' => $this->input->post('transaction_date', TRUE),
                 'transaction_type' => $this->input->post('transaction_type', TRUE),
-                'quantity' => $this->input->post('quantity'),
+                'quantity' => $quantity,
                 'price' => $this->input->post('price'),
                 'fee' => $this->input->post('fee') ?: 0,
-                'notes' => $this->input->post('notes', TRUE)
+                'notes' => $notes
             ));
 
-            $this->session->set_flashdata('success', 'Transaksi berhasil dicatat.');
-            redirect('transactions');
+            if ($saved) {
+                $this->session->set_flashdata('success', 'Transaksi berhasil dicatat dan portofolio otomatis diperbarui.');
+                redirect('transactions');
+            }
+
+            $this->session->set_flashdata('error', $this->Transaction_model->error() ?: 'Transaksi gagal dicatat.');
+            redirect('transactions/create');
         }
 
         $data = array(

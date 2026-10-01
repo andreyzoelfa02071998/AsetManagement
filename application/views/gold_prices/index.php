@@ -116,10 +116,12 @@ $rows = isset($portfolio['rows']) ? $portfolio['rows'] : array();
                         <?php
                         $asset_gain = isset($asset->gain_loss) ? (float) $asset->gain_loss : 0;
                         $note = 'Manual/import terakhir';
+                        $price_label = 'Harga Market';
                         if ($asset->type === 'saham') {
                             $note = 'Update IDX/Yahoo Finance';
                         } elseif ($asset->type === 'emas') {
                             $note = 'Valuasi pakai buyback Tring/Pegadaian';
+                            $price_label = 'Buyback';
                         } elseif ($asset->type === 'rdn' || $asset->type === 'kas') {
                             $note = 'Saldo tetap, tanpa gain/loss market';
                         }
@@ -147,10 +149,18 @@ $rows = isset($portfolio['rows']) ? $portfolio['rows'] : array();
                                     <?php echo number_format((float) $asset->quantity_current, 4, ',', '.'); ?> <?php echo html_escape($asset->unit); ?>
                                 <?php endif; ?>
                             </td>
-                            <td class="text-right"><?php echo $asset->market_price ? rupiah($asset->market_price) : '-'; ?></td>
+                            <td class="text-right">
+                                <?php echo $asset->market_price ? rupiah($asset->market_price) : '-'; ?>
+                                <div class="muted"><?php echo html_escape($price_label); ?></div>
+                            </td>
                             <td class="text-right"><?php echo rupiah($asset->market_value); ?></td>
                             <td class="text-right"><span class="<?php echo $asset_gain >= 0 ? 'positive' : 'negative'; ?>"><?php echo rupiah($asset_gain); ?></span></td>
-                            <td><?php echo html_escape($note); ?></td>
+                            <td>
+                                <?php echo html_escape($note); ?>
+                                <?php if ($asset->type === 'emas' && (float) $asset->min_purchase_amount > 0): ?>
+                                    <div class="muted">Harga beli baru: <?php echo rupiah($asset->min_purchase_amount); ?> / 0,01g</div>
+                                <?php endif; ?>
+                            </td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
@@ -166,8 +176,9 @@ $rows = isset($portfolio['rows']) ? $portfolio['rows'] : array();
             <span class="badge <?php echo $signal['class']; ?>"><?php echo html_escape($signal['label']); ?></span>
         </div>
         <p class="muted">Target beli: <?php echo rupiah($target_price); ?> / 0,01g</p>
-        <p>Harga user beli <strong><?php echo $latest ? rupiah($latest->price) : '-'; ?></strong> / 0,01g</p>
-        <p>Harga user jual <strong><?php echo $latest && isset($latest->buy_price) ? rupiah($latest->buy_price) : '-'; ?></strong> / 0,01g</p>
+        <p>Harga beli baru <strong><?php echo $latest ? rupiah($latest->price) : '-'; ?></strong> / 0,01g</p>
+        <p>Buyback / nilai jual aset <strong><?php echo $latest && isset($latest->buy_price) ? rupiah($latest->buy_price) : '-'; ?></strong> / 0,01g</p>
+        <p class="muted">Reminder emas pakai harga beli baru, sedangkan nilai aset emas pakai buyback.</p>
     </div>
 
     <div class="panel">
